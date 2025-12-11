@@ -27,7 +27,7 @@ const { Header, Content } = Layout;
 const { Option } = Select;
 
 // ---------- CẤU HÌNH ----------
-const BASE_URL = "https://apipubaws.tcbs.com.vn";
+// Remove BASE_URL usage for direct calls since it causes CORS
 const PROXY_BASE = "/.netlify/functions/proxy";
 
 // ---------- Các kiểu dữ liệu (Types) ----------
@@ -51,28 +51,19 @@ async function fetchViaProxy(path: string) {
   return res.data;
 }
 
+// FIX: Removed the try/catch fallback that called BASE_URL directly
 async function fetchTickerOverview(ticker: string): Promise<TickerOverview> {
   const path = `/tcanalysis/v1/ticker/${encodeURIComponent(ticker)}/overview`;
-  try {
-    return await fetchViaProxy(path);
-  } catch (e) {
-    const url = `${BASE_URL}${path}`;
-    const res = await axios.get(url);
-    return res.data;
-  }
+  return await fetchViaProxy(path);
 }
 
+// FIX: Removed the try/catch fallback that called BASE_URL directly
 async function fetchCompanyOverview(ticker: string): Promise<any> {
   const path = `/tcanalysis/v1/company/${encodeURIComponent(ticker)}/overview`;
-  try {
-    return await fetchViaProxy(path);
-  } catch (e) {
-    const url = `${BASE_URL}${path}`;
-    const res = await axios.get(url);
-    return res.data;
-  }
+  return await fetchViaProxy(path);
 }
 
+// FIX: Removed the try/catch fallback that called BASE_URL directly
 async function fetchTickerHistory(
   ticker: string,
   range: string = "1m"
@@ -80,24 +71,15 @@ async function fetchTickerHistory(
   const path = `/tcanalysis/v1/ticker/${encodeURIComponent(
     ticker
   )}/history?range=${range}`;
-  try {
-    const res = await fetchViaProxy(path);
-    if (Array.isArray(res))
-      return res.map((p: any) => ({
-        date: p.date || p.tradingDate || p.dt,
-        close: p.close || p.price || p.c,
-      }));
-    return [];
-  } catch (e) {
-    const url = `${BASE_URL}${path}`;
-    const res = await axios.get(url);
-    if (Array.isArray(res.data))
-      return res.data.map((p: any) => ({
-        date: p.date || p.tradingDate || p.dt,
-        close: p.close || p.price || p.c,
-      }));
-    return [];
+
+  const res = await fetchViaProxy(path);
+  if (Array.isArray(res)) {
+    return res.map((p: any) => ({
+      date: p.date || p.tradingDate || p.dt,
+      close: p.close || p.price || p.c,
+    }));
   }
+  return [];
 }
 
 async function fetchTickerSuggestions(q: string): Promise<string[]> {
@@ -108,8 +90,11 @@ async function fetchTickerSuggestions(q: string): Promise<string[]> {
     if (res && Array.isArray(res.items))
       return res.items.map((it: any) => `${it.ticker}`);
   } catch (e) {
-    // ignore
+    // Just ignore errors here, don't fallback to direct URL
+    console.warn("Search failed", e);
   }
+
+  // Local Fallback (Safe)
   const fallback = [
     "VHM",
     "VIC",
@@ -121,6 +106,7 @@ async function fetchTickerSuggestions(q: string): Promise<string[]> {
     "HPG",
     "BVH",
     "MWG",
+    "PSC",
   ];
   return fallback.filter((s) => s.includes(q.toUpperCase()));
 }
@@ -149,7 +135,7 @@ export default function MarketDashboard(): JSX.Element {
     debounceRef.current = window.setTimeout(async () => {
       try {
         const items = await fetchTickerSuggestions(value);
-        setOptions(items.map((t) => ({ value: t })));
+        setOptions((items || []).map((t) => ({ value: t })));
       } catch (e) {
         setOptions([]);
       }
@@ -165,15 +151,15 @@ export default function MarketDashboard(): JSX.Element {
     try {
       const [ov, co, hi] = await Promise.all([
         fetchTickerOverview(ticker).catch((e) => {
-          console.warn("lỗi overview", e);
+          console.warn("Lỗi overview:", e);
           return null;
         }),
         fetchCompanyOverview(ticker).catch((e) => {
-          console.warn("lỗi company overview", e);
+          console.warn("Lỗi company:", e);
           return null;
         }),
         fetchTickerHistory(ticker, range).catch((e) => {
-          console.warn("lỗi history", e);
+          console.warn("Lỗi history:", e);
           return [];
         }),
       ]);
@@ -183,7 +169,7 @@ export default function MarketDashboard(): JSX.Element {
       setSelectedTicker(ticker.toUpperCase());
     } catch (err: any) {
       console.error(err);
-      message.error("Lỗi khi gọi API. Kiểm tra CORS/proxy hoặc API endpoint.");
+      message.error("Lỗi khi gọi API. Kiểm tra Proxy.");
     } finally {
       setLoading(false);
     }
@@ -205,17 +191,13 @@ export default function MarketDashboard(): JSX.Element {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      {/* Cập nhật style Header: 
-         - background: "#001529" (Màu tối giống App cũ)
-         - display: "flex" ngay tại Header hoặc div con bên trong để căn chỉnh
-      */}
       <Header
         style={{
           background: "#001529",
           color: "white",
           fontSize: 20,
           fontWeight: 600,
-          padding: "0 24px", // Thêm padding chuẩn
+          padding: "0 24px",
         }}
       >
         <div
@@ -223,17 +205,15 @@ export default function MarketDashboard(): JSX.Element {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            width: "100%", // Quan trọng: Chiếm toàn bộ chiều ngang
+            width: "100%",
             height: "100%",
           }}
         >
-          {/* Bên TRÁI: Logo/Tiêu đề */}
           <div style={{ display: "flex", alignItems: "center", fontSize: 18 }}>
             <AreaChartOutlined style={{ marginRight: 8 }} />
             Bảng tin Chứng khoán
           </div>
 
-          {/* Bên PHẢI: Thanh tìm kiếm */}
           <div style={{ display: "flex", gap: 8 }}>
             <AutoComplete
               style={{ width: 260 }}
@@ -275,10 +255,7 @@ export default function MarketDashboard(): JSX.Element {
                     rowKey={(r) => r.key}
                   />
                 ) : (
-                  <div>
-                    Không có dữ liệu tổng quan. Thử tìm mã khác hoặc kiểm tra
-                    proxy/CORS.
-                  </div>
+                  <div>Không có dữ liệu tổng quan.</div>
                 )}
               </Card>
 
@@ -305,7 +282,12 @@ export default function MarketDashboard(): JSX.Element {
                   >
                     <Select
                       value={range}
-                      onChange={(v) => setRange(v)}
+                      onChange={(v) => {
+                        setRange(v);
+                        // Trigger reload explicitly if needed or wait for next search
+                        // Better user experience: re-fetch immediately
+                        searchTicker(selectedTicker);
+                      }}
                       style={{ width: 120 }}
                     >
                       <Option value="1m">1 tháng</Option>
@@ -334,7 +316,7 @@ export default function MarketDashboard(): JSX.Element {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <div>Không có dữ liệu lịch sử. Thử làm mới hoặc đổi mã.</div>
+                  <div>Không có dữ liệu lịch sử.</div>
                 )}
               </Card>
 
